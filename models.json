@@ -1,0 +1,32 @@
+{
+  "_help": "One entry per model. To add a model, copy an entry and change it; the dashboard and fake-data script pick it up automatically. Prices are USD per 1M tokens (check the provider's pricing page). Use null prices for local models.",
+  "models": [
+    {
+      "name": "Claude Opus 5.5",
+      "role": "Strong API model",
+      "provider": "Anthropic API",
+      "model_id": "claude-opus-5-5",
+      "local": false,
+      "price_in_per_1m": 15.0,
+      "price_out_per_1m": 75.0
+    },
+    {
+      "name": "Claude Haiku 4.5",
+      "role": "Cheap API model",
+      "provider": "Anthropic API",
+      "model_id": "claude-haiku-4-5-20251001",
+      "local": false,
+      "price_in_per_1m": 1.0,
+      "price_out_per_1m": 5.0
+    },
+    {
+      "name": "Llama 3.1 8B",
+      "role": "Local model",
+      "provider": "Ollama",
+      "model_id": "llama3.1:8b",
+      "local": true,
+      "price_in_per_1m": null,
+      "price_out_per_1m": null
+    }
+  ]
+}
