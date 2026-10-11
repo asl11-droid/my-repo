@@ -15,19 +15,20 @@ HERE = Path(__file__).parent
 rng = np.random.default_rng(42)
 RUNS = 5
 
-# Fake-only behaviour per model: (skill 0-1, output tokens/sec, verbosity).
-# A model in models.json that isn't listed here gets made-up values from its name.
+# Fake-only behaviour per model: target accuracy on each test set, output tokens/sec, verbosity.
+# Tuned so different models win different categories at the default slider settings
+# (sample data only; real results come from the benchmark runner).
 FAKE_BEHAVIOUR = {
-    "Claude Opus 5.5":  (0.93, 55, 1.30),
-    "Claude Haiku 4.5": (0.82, 150, 0.90),
-    "Llama 3.1 8B":     (0.62, 40, 0.85),
+    "Claude Opus 5.5":  ({"GSM8K": .96, "HumanEval+": .90, "IFEval": .88, "MMLU-Pro": .80}, 55, 1.30),
+    "Claude Haiku 4.5": ({"GSM8K": .95, "HumanEval+": .78, "IFEval": .87, "MMLU-Pro": .78}, 150, 0.90),
+    "Llama 3.1 8B":     ({"GSM8K": .80, "HumanEval+": .55, "IFEval": .84, "MMLU-Pro": .52}, 60, 0.85),
 }
-# test set: (questions, difficulty exponent, avg input tokens, avg output tokens)
+# test set: (questions, avg input tokens, avg output tokens)
 TEST_SETS = {
-    "GSM8K":      (1319, 0.35, 220, 320),
-    "HumanEval+": (164,  1.10, 450, 380),
-    "IFEval":     (541,  1.00, 180, 350),
-    "MMLU-Pro":   (500,  2.00, 300, 200),   # fixed random subset
+    "GSM8K":      (1319, 220, 320),
+    "HumanEval+": (164,  450, 380),
+    "IFEval":     (541,  180, 350),
+    "MMLU-Pro":   (500,  300, 200),   # fixed random subset
 }
 
 models = json.loads((HERE / "models.json").read_text())["models"]
@@ -37,16 +38,26 @@ def behaviour(name):
     if name in FAKE_BEHAVIOUR:
         return FAKE_BEHAVIOUR[name]
     h = int(hashlib.md5(name.encode()).hexdigest(), 16)
-    return 0.70 + (h % 20) / 100, 60 + h % 100, 0.8 + (h % 5) / 10
+    acc = 0.65 + (h % 25) / 100
+    return {ts: acc for ts in TEST_SETS}, 60 + h % 100, 0.8 + (h % 5) / 10
+
+
+def per_question_probs(target, q_hard):
+    """Per-question chance of a correct answer whose average equals `target`."""
+    lo, hi = -10.0, 10.0
+    for _ in range(60):                      # bisection on the logit offset
+        mid = (lo + hi) / 2
+        mean = (1 / (1 + np.exp(-(mid - q_hard)))).mean()
+        lo, hi = (mid, hi) if mean < target else (lo, mid)
+    return 1 / (1 + np.exp(-(lo - q_hard)))
 
 
 rows = []
-for ts, (n, diff, tin, tout) in TEST_SETS.items():
+for ts, (n, tin, tout) in TEST_SETS.items():
     q_hard = rng.normal(0, 1.0, n)                      # some questions are harder for everyone
     for m in models:
-        skill, tps, verb = behaviour(m["name"])
-        base = skill ** diff
-        p_q = 1 / (1 + np.exp(-(np.log(base / (1 - base)) - q_hard)))
+        accs, tps, verb = behaviour(m["name"])
+        p_q = per_question_probs(accs[ts], q_hard)
         prefill = 1500 if m["local"] else 12000         # local models read the prompt slower
         for run in range(1, RUNS + 1):
             correct = (rng.random(n) < p_q).astype(int)
