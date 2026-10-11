@@ -1,5 +1,5 @@
 {
-  "_help": "One entry per model. To add a model, copy an entry and change it; the dashboard and fake-data script pick it up automatically. Prices are USD per 1M tokens (Anthropic prices checked Oct 2026 at platform.claude.com/docs/en/about-claude/pricing). Use null prices for local models.",
+  "_help": "One entry per model. To add a model, copy an entry and change it; the dashboard and fake-data script pick it up automatically. API prices are USD per 1M tokens (Anthropic prices checked Oct 2026 at platform.claude.com/docs/en/about-claude/pricing). Local models use energy cost instead: gpu_watts and price_per_kwh (cost model doc, Sprint 3).",
   "models": [
     {
       "name": "Claude Opus 5.5",
@@ -25,8 +25,9 @@
       "provider": "Ollama",
       "model_id": "llama3.1:8b",
       "local": true,
-      "price_in_per_1m": null,
-      "price_out_per_1m": null
+      "gpu_watts": 150,
+      "price_per_kwh": 0.15
     }
-  ]
+  ],
+  "price_snapshot": "2026-10-11"
 }

@@ -1,29 +1,27 @@
 # Right-Size Model Bench (Cheap Thrills · CS 124H)
 
-A Streamlit dashboard. The homescreen asks what the user needs a model for. The grading page then
-says "X model is the best for this task because of data from these tests", grades every model
-A+ to F, and shows scores with 95% confidence intervals (LLM Measurements doc).
+Streamlit dashboard. The homescreen asks what you need a model for (type it, or search 61 common tasks).
+The results page recommends the model with the **lowest expected cost per task**, following
+*Actuarial Cost Model — Sprint 3 (revised)*:
+
+    E[C] = cost to run + chance of a wrong answer × cost of that wrong answer + response time × value of time
+
+with sliders for your hourly rate, minutes to fix a wrong answer, and how much waiting costs you.
 
 ## Files
-- `streamlit_app.py`: the dashboard (start page + grading page)
-- `scoring.py`: scoring, task types, targets, minimum accuracies, grade scale, task matching.
-  Run `python scoring.py` to check it against the doc's worked examples.
-- `tasks.py`: the searchable task list on the homescreen (61 tasks) and the matching for typed-in tasks. Add rows to `TASK_CATALOG` to grow the list.
-- `models.json`: the settings file. One entry per model with prices per 1M tokens (null for local).
-  To add a model, add an entry here; no code changes.
-- `make_fake_data.py`: writes fake `data/results.csv` for the models in models.json
+- `streamlit_app.py`: the dashboard (homescreen + results page)
+- `costmodel.py`: expected cost, Wilson ranges, break-even, paired-bootstrap tie check, the four categories.
+  Run `python costmodel.py` to check it against every number in the cost-model doc.
+- `tasks.py`: task list and matching typed tasks to a category (coding, knowledge, math, instruction following)
+- `scoring.py`: the older weighted 0–100 score (LLM Measurements doc), shown as a secondary view
+- `models.json`: settings file. API models: price per 1M tokens. Local models: `gpu_watts`, `price_per_kwh`.
+- `make_fake_data.py`: writes sample `data/results.csv` for the models in models.json
 - `data/results.csv`: one row per model / test set / question / run:
   `model, test_set, question_id, run, correct, time_s, input_tokens, output_tokens`
-  (dollar cost is computed from models.json prices)
 
 ## Run locally
     pip install -r requirements.txt
     streamlit run streamlit_app.py
 
-## Add a 4th model (Sprint 8)
-1. Add an entry to `models.json`.
-2. Run the benchmark for it (or `python make_fake_data.py` for fake data).
-3. Push to GitHub; the live site updates.
-
-## Still to decide (placeholders in scoring.py)
-Time / cost targets and cutoffs per task type, grade cutoffs, minimum accuracies after first runs.
+## Add a model (Sprint 8)
+Add an entry to `models.json`, run its benchmarks (or `python make_fake_data.py`), push.

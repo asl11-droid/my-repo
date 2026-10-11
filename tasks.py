@@ -1,152 +1,151 @@
 """Task catalog and free-text task matching.
 
-TASK_CATALOG is the searchable list on the homescreen. Each entry maps a common
-task to one of the task types in scoring.TASK_TYPES. Add rows freely.
-
-match_task() handles anything the user types: it scores the text against
-keywords for each task type and also looks for the closest catalog task.
+Every task maps to one of the four MVP categories (costmodel.CATEGORIES):
+coding (HumanEval+), knowledge (MMLU-Pro), math (GSM8K), ifeval (IFEval),
+plus a suggested waiting preset (how much of the wait the user actually loses).
+Add rows to TASK_CATALOG freely.
 """
 import difflib
 import re
 
-HARD = "Hard stuff (math, coding)"
-CHAT = "Chatbot / needs to be fast"
-BUDGET = "On a budget"
-DEFAULT = "Default"
+I, S, B = ("Interactive (chat, pair coding)", "Semi-interactive (I switch tabs)", "Batch / background")
 
-# (category, task, task type)
+# (group, task, category, waiting preset)
 TASK_CATALOG = [
     # Coding
-    ("Coding", "Write a function from a description", HARD),
-    ("Coding", "Write code that passes unit tests", HARD),
-    ("Coding", "Debug an error or stack trace", HARD),
-    ("Coding", "Refactor or clean up existing code", HARD),
-    ("Coding", "Write unit tests for my code", HARD),
-    ("Coding", "Explain what a piece of code does", HARD),
-    ("Coding", "Convert code from one language to another", HARD),
-    ("Coding", "Write SQL queries", HARD),
-    ("Coding", "Write a data-cleaning script in Python", HARD),
-    ("Coding", "Solve LeetCode / interview problems", HARD),
-    ("Coding", "Review a pull request for bugs", HARD),
-    ("Coding", "Build a small web app or API endpoint", HARD),
-    ("Coding", "Help with Java programming homework", HARD),
-    ("Coding", "Write shell / bash scripts", HARD),
-    # Math & reasoning
-    ("Math & reasoning", "Solve math word problems", HARD),
-    ("Math & reasoning", "Step-by-step algebra or calculus help", HARD),
-    ("Math & reasoning", "Linear algebra homework (matrices, eigenvalues)", HARD),
-    ("Math & reasoning", "Check a proof or derivation", HARD),
-    ("Math & reasoning", "Statistics and probability questions", HARD),
-    ("Math & reasoning", "Physics or engineering calculations", HARD),
-    ("Math & reasoning", "Logic puzzles and multi-step reasoning", HARD),
-    ("Math & reasoning", "Financial calculations (interest, budgets, forecasts)", HARD),
-    ("Math & reasoning", "Analyze numbers in a spreadsheet", HARD),
-    # Chat & support
-    ("Chat & support", "Customer support chatbot", CHAT),
-    ("Chat & support", "FAQ bot for a website", CHAT),
-    ("Chat & support", "Course or class Q&A assistant", CHAT),
-    ("Chat & support", "Real-time voice or chat assistant", CHAT),
-    ("Chat & support", "Help desk / IT support replies", CHAT),
-    ("Chat & support", "Booking or scheduling assistant", CHAT),
-    ("Chat & support", "Onboarding guide for new users", CHAT),
-    ("Chat & support", "Quick autocomplete or suggested replies", CHAT),
-    ("Chat & support", "Discord or Slack bot", CHAT),
-    ("Chat & support", "Language practice conversation partner", CHAT),
-    # Writing & instructions
-    ("Writing & instructions", "Draft professional emails", DEFAULT),
-    ("Writing & instructions", "Rewrite text in a specific tone or style", DEFAULT),
-    ("Writing & instructions", "Follow a strict output format (JSON, bullet list, word limit)", DEFAULT),
-    ("Writing & instructions", "Write a cover letter or resume bullets", DEFAULT),
-    ("Writing & instructions", "Write blog posts or articles", DEFAULT),
-    ("Writing & instructions", "Proofread and fix grammar", DEFAULT),
-    ("Writing & instructions", "Create social media captions", DEFAULT),
-    ("Writing & instructions", "Write product descriptions", DEFAULT),
-    ("Writing & instructions", "Translate text between languages", DEFAULT),
-    ("Writing & instructions", "Fill in a template or form", DEFAULT),
-    # Knowledge & study
-    ("Knowledge & study", "Answer general knowledge questions", DEFAULT),
-    ("Knowledge & study", "Explain a concept simply", DEFAULT),
-    ("Knowledge & study", "Make flashcards or quiz questions", DEFAULT),
-    ("Knowledge & study", "Study help for exams", DEFAULT),
-    ("Knowledge & study", "Summarize a lecture or article", DEFAULT),
-    ("Knowledge & study", "Research a topic and give an overview", DEFAULT),
-    ("Knowledge & study", "Answer science or history questions", DEFAULT),
-    ("Knowledge & study", "Compare options and give pros and cons", DEFAULT),
-    # High volume / budget
-    ("High volume / budget", "Classify or tag thousands of items", BUDGET),
-    ("High volume / budget", "Extract fields from many documents or invoices", BUDGET),
-    ("High volume / budget", "Summarize a large batch of emails or reviews", BUDGET),
-    ("High volume / budget", "Sentiment analysis on customer feedback", BUDGET),
-    ("High volume / budget", "Clean up or label a dataset", BUDGET),
-    ("High volume / budget", "Generate many short descriptions in bulk", BUDGET),
-    ("High volume / budget", "Moderate or filter user comments", BUDGET),
-    ("High volume / budget", "Turn messy text into structured data", BUDGET),
-    ("High volume / budget", "Translate a large set of short strings", BUDGET),
-    ("High volume / budget", "Student side project with no budget", BUDGET),
+    ("Coding", "Write a function from a description", "coding", S),
+    ("Coding", "Write code that passes unit tests", "coding", S),
+    ("Coding", "Debug an error or stack trace", "coding", I),
+    ("Coding", "Refactor or clean up existing code", "coding", S),
+    ("Coding", "Write unit tests for my code", "coding", S),
+    ("Coding", "Explain what a piece of code does", "coding", I),
+    ("Coding", "Convert code from one language to another", "coding", S),
+    ("Coding", "Write SQL queries", "coding", I),
+    ("Coding", "Write a data-cleaning script in Python", "coding", S),
+    ("Coding", "Solve LeetCode / interview problems", "coding", I),
+    ("Coding", "Review a pull request for bugs", "coding", B),
+    ("Coding", "Build a small web app or API endpoint", "coding", S),
+    ("Coding", "Help with Java programming homework", "coding", I),
+    ("Coding", "Pair-program with an AI in my editor", "coding", I),
+    ("Coding", "Write shell / bash scripts", "coding", S),
+    # Math
+    ("Math", "Solve math word problems", "math", I),
+    ("Math", "Step-by-step algebra or calculus help", "math", I),
+    ("Math", "Linear algebra homework (matrices, eigenvalues)", "math", I),
+    ("Math", "Check my homework answers", "math", S),
+    ("Math", "Statistics and probability questions", "math", I),
+    ("Math", "Physics or engineering calculations", "math", S),
+    ("Math", "Logic puzzles and multi-step reasoning", "math", I),
+    ("Math", "Financial calculations (interest, budgets, forecasts)", "math", S),
+    ("Math", "Analyze numbers in a spreadsheet", "math", S),
+    ("Math", "Grade a batch of math answers", "math", B),
+    # Instruction following
+    ("Instructions & writing", "Customer support chatbot that follows our policies", "ifeval", I),
+    ("Instructions & writing", "Draft professional emails", "ifeval", S),
+    ("Instructions & writing", "Rewrite text in a specific tone or style", "ifeval", S),
+    ("Instructions & writing", "Follow a strict output format (JSON, bullet list, word limit)", "ifeval", S),
+    ("Instructions & writing", "Write a cover letter or resume bullets", "ifeval", S),
+    ("Instructions & writing", "Proofread and fix grammar", "ifeval", S),
+    ("Instructions & writing", "Create social media captions", "ifeval", S),
+    ("Instructions & writing", "Fill in a template or form", "ifeval", S),
+    ("Instructions & writing", "Booking or scheduling assistant", "ifeval", I),
+    ("Instructions & writing", "Discord or Slack bot", "ifeval", I),
+    ("Instructions & writing", "Quick autocomplete or suggested replies", "ifeval", I),
+    ("Instructions & writing", "Classify or tag thousands of items", "ifeval", B),
+    ("Instructions & writing", "Extract fields from many documents or invoices", "ifeval", B),
+    ("Instructions & writing", "Summarize a large batch of emails or reviews", "ifeval", B),
+    ("Instructions & writing", "Turn messy text into structured data", "ifeval", B),
+    ("Instructions & writing", "Moderate or filter user comments", "ifeval", B),
+    ("Instructions & writing", "Translate a large set of short strings", "ifeval", B),
+    # General knowledge
+    ("General knowledge", "Answer general knowledge questions", "knowledge", I),
+    ("General knowledge", "FAQ bot for a website", "knowledge", I),
+    ("General knowledge", "Course or class Q&A assistant", "knowledge", I),
+    ("General knowledge", "Help desk / IT support answers", "knowledge", I),
+    ("General knowledge", "Explain a concept simply", "knowledge", I),
+    ("General knowledge", "Make flashcards or quiz questions", "knowledge", S),
+    ("General knowledge", "Study help for exams", "knowledge", I),
+    ("General knowledge", "Summarize a lecture or article", "knowledge", S),
+    ("General knowledge", "Research a topic and give an overview", "knowledge", S),
+    ("General knowledge", "Answer science or history questions", "knowledge", I),
+    ("General knowledge", "Compare options and give pros and cons", "knowledge", S),
+    ("General knowledge", "Sentiment analysis on customer feedback", "knowledge", B),
+    ("General knowledge", "Language practice conversation partner", "knowledge", I),
+    ("General knowledge", "Medical or legal background reading (not advice)", "knowledge", S),
+    ("General knowledge", "Trivia or quiz game host", "knowledge", I),
+    ("General knowledge", "Fact-check a draft", "knowledge", S),
+    ("General knowledge", "Write blog posts or articles", "knowledge", S),
+    ("General knowledge", "Write product descriptions in bulk", "knowledge", B),
+    ("General knowledge", "Onboarding guide for new users", "knowledge", I),
 ]
 
-CATALOG_LABELS = [f"{cat} — {task}" for cat, task, _ in TASK_CATALOG]
-CATALOG_TYPE = {f"{cat} — {task}": tt for cat, task, tt in TASK_CATALOG}
+CATALOG_LABELS = [f"{g} — {t}" for g, t, _, _ in TASK_CATALOG]
+CATALOG = {f"{g} — {t}": (t, c, w) for g, t, c, w in TASK_CATALOG}
 
 KEYWORDS = {
-    HARD: ["math", "code", "coding", "program", "python", "java", "javascript", "c++", "function",
-           "bug", "debug", "error", "stack trace", "refactor", "algorithm", "leetcode", "equation",
-           "calculat", "solve", "proof", "derivation", "sql", "query", "script", "unit test", "test case",
-           "homework", "algebra", "calculus", "linear algebra", "matrix", "matrices", "eigen", "statistic",
-           "probability", "physics", "engineering", "logic", "reasoning", "puzzle", "api", "compile",
-           "numpy", "spreadsheet formula", "data analysis", "analyze data"],
-    CHAT: ["chat", "chatbot", "bot", "customer", "support", "help desk", "helpdesk", "faq", "reply",
-           "replies", "conversation", "real-time", "realtime", "real time", "fast", "quick", "instant",
-           "assistant", "discord", "slack", "voice", "live", "respond", "users ask", "booking",
-           "schedul", "onboarding", "autocomplete", "low latency", "latency"],
-    BUDGET: ["cheap", "budget", "low cost", "low-cost", "inexpensive", "free", "bulk", "batch",
-             "thousands", "millions", "hundreds", "large volume", "high volume", "lots of", "many",
-             "save money", "classify", "tag", "label", "extract", "invoice", "sentiment", "moderate",
-             "filter", "dataset", "every", "all of our"],
-    DEFAULT: ["question", "fact", "explain", "knowledge", "trivia", "summar", "email", "format",
-              "write", "writing", "essay", "blog", "article", "instruction", "research", "study",
-              "exam", "quiz", "flashcard", "translate", "rewrite", "proofread", "grammar", "tone",
-              "resume", "cover letter", "caption", "template", "history", "science", "overview"],
+    "coding": ["code", "coding", "program", "python", "java", "javascript", "typescript", "c++", "rust",
+               "function", "bug", "debug", "stack trace", "refactor", "algorithm", "leetcode", "sql",
+               "script", "unit test", "test case", "api", "compile", "repo", "pull request", "web app",
+               "frontend", "backend", "html", "css", "regex"],
+    "math": ["math", "equation", "calculat", "solve", "proof", "derivation", "algebra", "calculus",
+             "linear algebra", "matrix", "matrices", "eigen", "statistic", "probability", "physics",
+             "engineering", "logic", "reasoning", "puzzle", "numbers", "arithmetic", "geometry",
+             "interest rate", "forecast", "homework answers", "word problem"],
+    "ifeval": ["format", "instruction", "json", "template", "email", "rewrite", "tone", "style", "proofread",
+               "grammar", "caption", "resume", "cover letter", "word limit", "bullet", "classify", "tag",
+               "label", "extract", "invoice", "structured", "moderate", "filter", "translate", "policy",
+               "policies", "customer", "booking", "schedul", "autocomplete", "form", "follow"],
+    "knowledge": ["question", "fact", "explain", "knowledge", "trivia", "summar", "research", "study",
+                  "exam", "quiz", "flashcard", "history", "science", "overview", "faq", "help desk",
+                  "lecture", "article", "learn", "teach", "course", "syllabus", "biology", "chemistry",
+                  "economics", "blog", "sentiment", "compare", "pros and cons"],
+}
+STRONG = {"code", "coding", "debug", "math", "json", "format", "trivia", "faq", "sql", "proof"}
+
+WAIT_WORDS = {
+    I: ["chat", "chatbot", "bot", "real-time", "realtime", "real time", "live", "instant", "quick",
+        "fast", "interactive", "voice", "assistant", "pair", "while i wait", "users ask", "customer"],
+    B: ["thousands", "millions", "hundreds", "bulk", "batch", "overnight", "background", "every",
+        "all of our", "large volume", "high volume", "dataset", "pipeline", "nightly"],
 }
 
 
-# Words that state the priority outright count double.
-STRONG = {"cheap", "budget", "low cost", "low-cost", "inexpensive", "save money", "real-time", "realtime",
-          "real time", "low latency", "chatbot", "math", "code", "coding", "debug"}
+def _hits(t, words):
+    found = []
+    for k in words:
+        m = re.search(r"\b" + re.escape(k) + r"[\w-]*", t)
+        if m and m.group(0) not in [w for w, _ in found]:
+            found.append((m.group(0), k))
+    return found
+
+
+def guess_wait(text):
+    t = (text or "").lower()
+    big = any(int(n.replace(",", "")) >= 1000 for n in re.findall(r"\d[\d,]*", t) if n.replace(",", "").isdigit())
+    if big or _hits(t, WAIT_WORDS[B]):
+        return B
+    if _hits(t, WAIT_WORDS[I]):
+        return I
+    return S
 
 
 def match_task(text: str):
-    """Return (task_type or None, reason string) for free text."""
+    """Return (category or None, waiting preset, reason) for free text."""
     t = (text or "").lower().strip()
     if not t:
-        return None, ""
-    if t in (lbl.lower() for lbl in CATALOG_LABELS):
-        lbl = next(l for l in CATALOG_LABELS if l.lower() == t)
-        return CATALOG_TYPE[lbl], f"you picked “{lbl.split(' — ', 1)[1]}”"
-
-    hits = {}
-    for tt, kws in KEYWORDS.items():
-        found = []
-        for k in kws:
-            m = re.search(r"\b" + re.escape(k) + r"[\w-]*", t)
-            if m and m.group(0) not in [w for w, _ in found]:
-                found.append((m.group(0), k))
-        hits[tt] = found
-    score = {tt: sum(2 if k in STRONG else 1 for _, k in h) for tt, h in hits.items()}
-
-    # Closest catalog task as a tie-breaker / fallback.
-    tasks_lower = [task.lower() for _, task, _ in TASK_CATALOG]
+        return None, S, ""
+    hits = {c: _hits(t, kws) for c, kws in KEYWORDS.items()}
+    score = {c: sum(2 if k in STRONG else 1 for _, k in h) for c, h in hits.items()}
+    if sum(score.values()) == 0:          # no real signal: ask the user instead of guessing
+        return None, guess_wait(t), ""
+    tasks_lower = [task.lower() for _, task, _, _ in TASK_CATALOG]
     close = difflib.get_close_matches(t, tasks_lower, n=1, cutoff=0.45)
     if close:
-        i = tasks_lower.index(close[0])
-        score[TASK_CATALOG[i][2]] += 0.75
-
+        score[TASK_CATALOG[tasks_lower.index(close[0])][2]] += 0.75
     best = max(score, key=score.get)
     if score[best] == 0:
-        return None, ""
+        return None, guess_wait(t), ""
     words = [w for w, _ in hits[best]][:4]
-    if words:
-        reason = "it mentions " + ", ".join(f"“{w}”" for w in words)
-    else:
-        reason = f"it's similar to “{TASK_CATALOG[tasks_lower.index(close[0])][1]}”"
-    return best, reason
+    reason = ("it mentions " + ", ".join(f"“{w}”" for w in words)) if words else \
+             f"it's similar to “{TASK_CATALOG[tasks_lower.index(close[0])][1]}”"
+    return best, guess_wait(t), reason
