@@ -7,6 +7,7 @@ time_score = (cutoff - time) / (cutoff - target), clipped to [0, 1]
 cost_score = (cutoff - cost_per_correct) / (cutoff - target), clipped to [0, 1]
 cost_per_correct = cost_per_answer / accuracy
 """
+import json
 import warnings
 
 import numpy as np
@@ -73,16 +74,63 @@ def score(acc, time_s, cost_per_answer, weights, time_tc, cost_tc):
 # From raw results to per-model scores
 # ---------------------------------------------------------------------------
 REQUIRED_COLUMNS = ["model", "test_set", "question_id", "run", "correct",
-                    "time_s", "input_tokens", "output_tokens", "cost_usd"]
+                    "time_s", "input_tokens", "output_tokens"]
 
 
-def per_question(results: pd.DataFrame) -> pd.DataFrame:
-    """Average over runs so there is one row per model / test set / question."""
-    df = results.copy()
+def load_models(path) -> dict:
+    """Read models.json (the settings file) -> {name: settings}."""
+    with open(path) as f:
+        return {m["name"]: m for m in json.load(f)["models"]}
+
+
+def per_question(results: pd.DataFrame, models: dict) -> pd.DataFrame:
+    """Average over runs so there is one row per model / test set / question.
+
+    Only models listed in models.json are kept. Dollar cost is computed from the
+    token counts and the prices in models.json, so prices live in one place.
+    Local models (null price) get NaN cost.
+    """
+    df = results[results["model"].isin(models)].copy()
     df["tokens"] = df["input_tokens"] + df["output_tokens"]
+    pin = df["model"].map(lambda m: models[m].get("price_in_per_1m"))
+    pout = df["model"].map(lambda m: models[m].get("price_out_per_1m"))
+    df["cost_usd"] = (df["input_tokens"] * pd.to_numeric(pin) +
+                      df["output_tokens"] * pd.to_numeric(pout)) / 1e6
     return (df.groupby(["model", "test_set", "question_id"], as_index=False)
               .agg(correct=("correct", "mean"), time_s=("time_s", "mean"),
                    tokens=("tokens", "mean"), cost_usd=("cost_usd", "mean")))
+
+
+def explain(res: pd.DataFrame, task_name: str, task: dict, min_acc: dict, n_runs: int,
+            n_questions: dict) -> str:
+    """The 'X is the best for this task because of data from these tests' sentence."""
+    elig = res[res["eligible"]]
+    if not res["applicable"].any():
+        return ("There aren't results yet for every test set this task type needs "
+                f"({', '.join(task['test_sets'])}). Run those benchmarks, then refresh.")
+    if elig.empty:
+        return ("No model meets the minimum accuracy on every test set for this task, "
+                "so there is no recommendation. Lower a minimum or add a stronger model.")
+    top = elig.iloc[0]
+    unit = top["cost_unit"]
+    parts = [f"{top[f'acc_{ts}']:.2f} on {ts} ({n_questions.get(ts, '?'):,} questions)"
+             for ts in task["test_sets"]]
+    tests = parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " and " + parts[-1]
+    cost = (f"${top['cost_per_correct']:.4f}" if unit == "$"
+            else f"{top['cost_per_correct']:,.0f} tokens")
+    s = (f"**{top['model']}** is the best model for this task (task type: {task_name}) because of "
+         f"data from these tests: it scored {tests}, with every question run {n_runs} times. "
+         f"It answers in {top['time_s']:.1f}s on average and uses {cost} per correct answer, "
+         f"for a score of {top['score']:.1f} (95% CI {top['ci_low']:.1f} to {top['ci_high']:.1f}), "
+         f"grade **{top['grade']}**.")
+    if len(elig) > 1:
+        nxt = elig.iloc[1]
+        s += f" Next best is {nxt['model']} ({nxt['grade']}, {nxt['score']:.1f})."
+    for _, r in res[(~res["eligible"]) & res["applicable"]].iterrows():
+        fails = [f"{ts} ({r[f'acc_{ts}']:.2f} < {min_acc[ts]:.2f})"
+                 for ts in task["test_sets"] if r[f"acc_{ts}"] < min_acc[ts]]
+        s += f" {r['model']} was removed for missing the minimum accuracy on {', '.join(fails)}."
+    return s
 
 
 def evaluate_task(pq: pd.DataFrame, task: dict, weights=None, min_acc=None,

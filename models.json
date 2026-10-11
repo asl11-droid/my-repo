@@ -1,5 +1,5 @@
 {
-  "_help": "One entry per model. To add a model, copy an entry and change it; the dashboard and fake-data script pick it up automatically. Prices are USD per 1M tokens (check the provider's pricing page). Use null prices for local models.",
+  "_help": "One entry per model. To add a model, copy an entry and change it; the dashboard and fake-data script pick it up automatically. Prices are USD per 1M tokens (Anthropic prices checked Oct 2026 at platform.claude.com/docs/en/about-claude/pricing). Use null prices for local models.",
   "models": [
     {
       "name": "Claude Opus 5.5",
@@ -7,8 +7,8 @@
       "provider": "Anthropic API",
       "model_id": "claude-opus-5-5",
       "local": false,
-      "price_in_per_1m": 15.0,
-      "price_out_per_1m": 75.0
+      "price_in_per_1m": 4.0,
+      "price_out_per_1m": 20.0
     },
     {
       "name": "Claude Haiku 4.5",
